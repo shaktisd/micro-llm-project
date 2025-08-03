@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Training Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+        
+        .panel {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease;
+        }
+        
+        .panel:hover {
+            transform: translateY(-5px);
+        }
+        
+        .panel h3 {
+            margin-top: 0;
+            color: #FFD700;
+            text-align: center;
+            font-size: 1.3em;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px 0 rgba(31, 38, 135, 0.2);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px 0 rgba(31, 38, 135, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            text-align: center;
+            font-size: 18px;
+            margin: 15px 0;
+            font-weight: bold;
+        }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .metric {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #FFD700;
+        }
+        
+        .metric-label {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .attention-grid {
+            display: grid;
+            gap: 2px;
+            margin: 10px 0;
+            justify-content: center;
+        }
+        
+        .attention-cell {
+            width: 25px;
+            height: 25px;
+            border-radius: 3px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+        }
+        
+        .generation-output {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            min-height: 100px;
+            white-space: pre-wrap;
+            border-left: 4px solid #FFD700;
+        }
+        
+        .embedding-space {
+            width: 100%;
+            height: 300px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #FF6B6B, #4ECDC4);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+            width: 0%;
+        }
+        
+        .token-sequence {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin: 10px 0;
+        }
+        
+        .token {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .token.highlight {
+            background: #FFD700;
+            color: black;
+            transform: scale(1.1);
+        }
+        
+        canvas {
+            border-radius: 10px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Language Model Training Visualizer</h1>
+        
+        <div class="controls">
+            <button onclick="initializeModel()">Initialize Model</button>
+            <button onclick="startTraining()" id="trainBtn" disabled>Start Training</button>
+            <button onclick="pauseTraining()" id="pauseBtn" disabled>Pause</button>
+            <button onclick="generateText()" id="generateBtn" disabled>Generate Text</button>
+            <button onclick="resetModel()">Reset</button>
+        </div>
+        
+        <div class="status" id="status">Click "Initialize Model" to begin</div>
+        
+        <div class="metrics" id="metrics">
+            <div class="metric">
+                <div class="metric-value" id="epoch">0</div>
+                <div class="metric-label">Epoch</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="loss">--</div>
+                <div class="metric-label">Loss</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="perplexity">--</div>
+                <div class="metric-label">Perplexity</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="tokens">0</div>
+                <div class="metric-label">Tokens Seen</div>
+            </div>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress"></div>
+        </div>
+        
+        <div class="grid">
+            <div class="panel">
+                <h3>📈 Loss Curves</h3>
+                <div class="chart-container">
+                    <canvas id="lossChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h3>🎯 Attention Patterns</h3>
+                <div>Current sentence: <span id="currentSentence">--</span></div>
+                <div class="attention-grid" id="attentionGrid"></div>
+                <div style="font-size: 12px; text-align: center; margin-top: 10px;">
+                    Brighter = Higher Attention
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h3>📊 Token Predictions</h3>
+                <div>Next token probabilities:</div>
+                <div class="chart-container">
+                    <canvas id="tokenChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h3>🌌 Embedding Space (t-SNE)</h3>
+                <div class="embedding-space" id="embeddingSpace"></div>
+                <div style="font-size: 12px; text-align: center;">
+                    Similar words cluster together
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel full-width">
+            <h3>✨ Generated Text</h3>
+            <div>Prompt: <input type="text" id="promptInput" value="To be or not to be" 
+                 style="background: rgba(255,255,255,0.2); border: none; border-radius: 5px; padding: 5px; color: white; margin: 0 10px;"></div>
+            <div class="generation-output" id="generationOutput">Generated text will appear here...</div>
+            <div class="token-sequence" id="tokenSequence"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let model = null;
+        let trainingData = null;
+        let isTraining = false;
+        let currentEpoch = 0;
+        let trainingHistory = {
+            epochs: [],
+            trainLoss: [],
+            valLoss: [],
+            perplexity: []
+        };
+        
+        // Chart instances
+        let lossChart = null;
+        let tokenChart = null;
+        
+        // Sample training data (simplified Shakespeare-like text)
+        const sampleTexts = [
+            "To be or not to be that is the question",
+            "All the world's a stage and all the men and women merely players",
+            "Romeo Romeo wherefore art thou Romeo",
+            "A rose by any other name would smell as sweet",
+            "Now is the winter of our discontent",
+            "Friends Romans countrymen lend me your ears",
+            "To sleep perchance to dream ay there's the rub",
+            "The course of true love never did run smooth",
+            "All that glitters is not gold",
+            "The lady doth protest too much methinks"
+        ];
+        
+        // Simple vocabulary for demonstration
+        const vocabulary = [
+            "<PAD>", "<UNK>", "<BOS>", "<EOS>",
+            "to", "be", "or", "not", "that", "is", "the", "question",
+            "all", "world", "stage", "and", "men", "women", "players",
+            "romeo", "wherefore", "art", "thou", "a", "rose", "by",
+            "any", "other", "name", "would", "smell", "sweet",
+            "now", "winter", "of", "our", "discontent", "friends",
+            "romans", "countrymen", "lend", "me", "your", "ears",
+            "sleep", "perchance", "dream", "ay", "there", "rub",
+            "course", "true", "love", "never", "did", "run", "smooth",
+            "glitters", "gold", "lady", "doth", "protest", "too",
+            "much", "methinks", "merely", "but", "fair", "sweet",
+            "heart", "soul", "mind", "life", "death", "time", "day"
+        ];
+        
+        // Mock model class
+        class MockLLM {
+            constructor() {
+                this.vocab_size = vocabulary.length;
+                this.embedding_dim = 64;
+                this.n_heads = 4;
+                this.n_layers = 3;
+                this.embeddings = this.initializeEmbeddings();
+                this.attention_weights = this.initializeAttention();
+                this.loss_history = [];
+                this.tokens_seen = 0;
+            }
+            
+            initializeEmbeddings() {
+                // Random embeddings for each token
+                const embeddings = {};
+                for (let i = 0; i < this.vocab_size; i++) {
+                    embeddings[i] = Array.from({length: this.embedding_dim}, 
+                        () => (Math.random() - 0.5) * 0.1);
+                }
+                return embeddings;
+            }
+            
+            initializeAttention() {
+                // Initialize random attention patterns
+                const patterns = {};
+                for (let layer = 0; layer < this.n_layers; layer++) {
+                    patterns[layer] = {};
+                    for (let head = 0; head < this.n_heads; head++) {
+                        patterns[layer][head] = [];
+                    }
+                }
+                return patterns;
+            }
+            
+            trainStep(epoch) {
+                // Simulate training step with realistic loss decay
+                const baseLoss = 4.0;
+                const decay = 0.85;
+                const noise = (Math.random() - 0.5) * 0.2;
+                const loss = baseLoss * Math.pow(decay, epoch) + noise;
+                
+                this.loss_history.push(Math.max(0.5, loss));
+                this.tokens_seen += Math.floor(Math.random() * 1000) + 500;
+                
+                // Update embeddings (simulate learning)
+                this.updateEmbeddings(epoch);
+                
+                // Update attention patterns
+                this.updateAttentionPatterns();
+                
+                return this.loss_history[this.loss_history.length - 1];
+            }
+            
+            updateEmbeddings(epoch) {
+                // Simulate embeddings becoming more structured over time
+                const learningRate = 0.01 / (1 + epoch * 0.1);
+                
+                for (let i = 0; i < this.vocab_size; i++) {
+                    for (let j = 0; j < this.embedding_dim; j++) {
+                        // Add some structure based on token relationships
+                        const update = (Math.random() - 0.5) * learningRate;
+                        this.embeddings[i][j] += update;
+                        
+                        // Keep embeddings in reasonable range
+                        this.embeddings[i][j] = Math.max(-2, Math.min(2, this.embeddings[i][j]));
+                    }
+                }
+            }
+            
+            updateAttentionPatterns() {
+                // Generate realistic attention patterns
+                for (let layer = 0; layer < this.n_layers; layer++) {
+                    for (let head = 0; head < this.n_heads; head++) {
+                        const seqLen = 8; // Fixed sequence length for visualization
+                        const pattern = [];
+                        
+                        for (let i = 0; i < seqLen; i++) {
+                            const row = [];
+                            for (let j = 0; j <= i; j++) { // Causal attention
+                                let weight;
+                                if (head === 0) {
+                                    // Head 0: Local attention (adjacent tokens)
+                                    weight = Math.exp(-Math.abs(i - j) * 0.5);
+                                } else if (head === 1) {
+                                    // Head 1: Long-range attention
+                                    weight = Math.exp(-Math.abs(i - j) * 0.1);
+                                } else {
+                                    // Other heads: Random patterns
+                                    weight = Math.random() * Math.exp(-Math.abs(i - j) * 0.3);
+                                }
+                                row.push(weight);
+                            }
+                            // Normalize row
+                            const sum = row.reduce((a, b) => a + b, 0);
+                            pattern.push(row.map(w => w / sum));
+                        }
+                        
+                        this.attention_weights[layer][head] = pattern;
+                    }
+                }
+            }
+            
+            predict(sequence) {
+                // Simulate token prediction
+                const predictions = {};
+                const totalTokens = 20; // Top tokens to show
+                
+                for (let i = 0; i < totalTokens; i++) {
+                    const prob = Math.exp(-i * 0.5) * (Math.random() * 0.5 + 0.5);
+                    predictions[vocabulary[i % vocabulary.length]] = prob;
+                }
+                
+                // Normalize probabilities
+                const sum = Object.values(predictions).reduce((a, b) => a + b, 0);
+                for (let token in predictions) {
+                    predictions[token] /= sum;
+                }
+                
+                return predictions;
+            }
+        }
+        
+        function initializeModel() {
+            model = new MockLLM();
+            document.getElementById('status').textContent = 'Model initialized! Ready to train.';
+            document.getElementById('trainBtn').disabled = false;
+            document.getElementById('generateBtn').disabled = false;
+            
+            // Initialize charts
+            initializeCharts();
+            
+            // Initialize embedding visualization
+            initializeEmbeddingVisualization();
+            
+            updateMetrics();
+        }
+        
+        function initializeCharts() {
+            // Loss chart
+            const lossCtx = document.getElementById('lossChart').getContext('2d');
+            lossChart = new Chart(lossCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Training Loss',
+                        data: [],
+                        borderColor: '#FF6B6B',
+                        backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: 'white' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    },
+                    animation: {
+                        duration: 500
+                    }
+                }
+            });
+            
+            // Token prediction chart
+            const tokenCtx = document.getElementById('tokenChart').getContext('2d');
+            tokenChart = new Chart(tokenCtx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Probability',
+                        data: [],
+                        backgroundColor: 'rgba(78, 205, 196, 0.8)',
+                        borderColor: '#4ECDC4',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: 'white' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: 'white', maxRotation: 45 },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            ticks: { color: 'white' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        function startTraining() {
+            if (!model) return;
+            
+            isTraining = true;
+            document.getElementById('trainBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            document.getElementById('status').textContent = 'Training in progress...';
+            
+            trainStep();
+        }
+        
+        function trainStep() {
+            if (!isTraining || !model) return;
+            
+            currentEpoch++;
+            const loss = model.trainStep(currentEpoch);
+            
+            // Update training history
+            trainingHistory.epochs.push(currentEpoch);
+            trainingHistory.trainLoss.push(loss);
+            trainingHistory.perplexity.push(Math.exp(loss));
+            
+            // Update visualizations
+            updateLossChart();
+            updateAttentionVisualization();
+            updateMetrics();
+            updateEmbeddingVisualization();
+            updateTokenPredictions();
+            
+            // Continue training
+            if (currentEpoch < 50 && isTraining) {
+                setTimeout(trainStep, 200); // Slow down for visualization
+            } else if (currentEpoch >= 50) {
+                pauseTraining();
+                document.getElementById('status').textContent = 'Training complete!';
+            }
+        }
+        
+        function pauseTraining() {
+            isTraining = false;
+            document.getElementById('trainBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('status').textContent = 'Training paused.';
+        }
+        
+        function updateMetrics() {
+            if (!model) return;
+            
+            document.getElementById('epoch').textContent = currentEpoch;
+            
+            if (model.loss_history.length > 0) {
+                const currentLoss = model.loss_history[model.loss_history.length - 1];
+                document.getElementById('loss').textContent = currentLoss.toFixed(3);
+                document.getElementById('perplexity').textContent = Math.exp(currentLoss).toFixed(2);
+            }
+            
+            document.getElementById('tokens').textContent = model.tokens_seen.toLocaleString();
+            
+            // Update progress bar
+            const progress = Math.min(100, (currentEpoch / 50) * 100);
+            document.getElementById('progress').style.width = progress + '%';
+        }
+        
+        function updateLossChart() {
+            if (!lossChart || trainingHistory.trainLoss.length === 0) return;
+            
+            lossChart.data.labels = trainingHistory.epochs;
+            lossChart.data.datasets[0].data = trainingHistory.trainLoss;
+            lossChart.update('none'); // No animation for real-time updates
+        }
+        
+        function updateAttentionVisualization() {
+            if (!model) return;
+            
+            const grid = document.getElementById('attentionGrid');
+            const sentence = sampleTexts[currentEpoch % sampleTexts.length];
+            const tokens = sentence.split(' ').slice(0, 8); // Limit to 8 tokens
+            
+            document.getElementById('currentSentence').textContent = tokens.join(' ');
+            
+            // Clear previous grid
+            grid.innerHTML = '';
+            grid.style.gridTemplateColumns = `repeat(${tokens.length}, 1fr)`;
+            
+            // Get attention pattern from first head of first layer
+            const attention = model.attention_weights[0][0];
+            
+            if (attention && attention.length > 0) {
+                for (let i = 0; i < tokens.length; i++) {
+                    for (let j = 0; j <= i; j++) { // Causal mask
+                        const cell = document.createElement('div');
+                        cell.className = 'attention-cell';
+                        
+                        const weight = attention[i] ? attention[i][j] || 0 : 0;
+                        const intensity = Math.min(1, weight * 2);
+                        
+                        cell.style.backgroundColor = `rgba(255, 215, 0, ${intensity})`;
+                        cell.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+                        cell.title = `${tokens[i]} → ${tokens[j]}: ${weight.toFixed(3)}`;
+                        
+                        grid.appendChild(cell);
+                    }
+                    
+                    // Add empty cells for upper triangle (causal mask)
+                    for (let j = i + 1; j < tokens.length; j++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'attention-cell';
+                        cell.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+                        cell.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                        cell.title = 'Masked (future token)';
+                        grid.appendChild(cell);
+                    }
+                }
+            }
+        }
+        
+        function updateTokenPredictions() {
+            if (!model || !tokenChart) return;
+            
+            // Simulate predictions for current context
+            const predictions = model.predict("to be or");
+            
+            // Get top 8 predictions
+            const sortedPreds = Object.entries(predictions)
+                .sort(([,a], [,b]) => b - a)
+                .slice(0, 8);
+            
+            const labels = sortedPreds.map(([token]) => token);
+            const probs = sortedPreds.map(([, prob]) => prob);
+            
+            tokenChart.data.labels = labels;
+            tokenChart.data.datasets[0].data = probs;
+            tokenChart.update('none');
+        }
+        
+        function initializeEmbeddingVisualization() {
+            const container = document.getElementById('embeddingSpace');
+            container.innerHTML = ''; // Clear previous
+            
+            const width = container.clientWidth;
+            const height = 300;
+            
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+            
+            // Store reference for updates
+            container.svg = svg;
+        }
+        
+        function updateEmbeddingVisualization() {
+            if (!model) return;
+            
+            const container = document.getElementById('embeddingSpace');
+            const svg = container.svg;
+            
+            if (!svg) return;
+            
+            const width = container.clientWidth;
+            const height = 300;
+            
+            // Simulate t-SNE projection of embeddings to 2D
+            const points = [];
+            for (let i = 4; i < Math.min(30, vocabulary.length); i++) { // Skip special tokens
+                const embedding = model.embeddings[i];
+                
+                // Simple 2D projection (simulate t-SNE)
+                const x = (embedding[0] + embedding[1]) * 50 + width/2 + (Math.random() - 0.5) * 100;
+                const y = (embedding[2] + embedding[3]) * 50 + height/2 + (Math.random() - 0.5) * 80;
+                
+                points.push({
+                    x: Math.max(20, Math.min(width-20, x)),
+                    y: Math.max(20, Math.min(height-20, y)),
+                    token: vocabulary[i],
+                    embedding: embedding
+                });
+            }
+            
+            // Clear previous points
+            svg.selectAll('*').remove();
+            
+            // Add points
+            svg.selectAll('circle')
+                .data(points)
+                .enter()
+                .append('circle')
+                .attr('cx', d => d.x)
+                .attr('cy', d => d.y)
+                .attr('r', 6)
+                .attr('fill', '#4ECDC4')
+                .attr('stroke', 'white')
+                .attr('stroke-width', 2)
+                .style('opacity', 0.8)
+                .on('mouseover', function(event, d) {
+                    d3.select(this).attr('r', 10).attr('fill', '#FFD700');
+                })
+                .on('mouseout', function(event, d) {
+                    d3.select(this).attr('r', 6).attr('fill', '#4ECDC4');
+                });
+            
+            // Add labels
+            svg.selectAll('text')
+                .data(points)
+                .enter()
+                .append('text')
+                .attr('x', d => d.x)
+                .attr('y', d => d.y - 10)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'white')
+                .attr('font-size', '10px')
+                .attr('font-weight', 'bold')
+                .text(d => d.token)
+                .style('text-shadow', '1px 1px 2px rgba(0,0,0,0.7)');
+        }
+        
+        function generateText() {
+            if (!model) return;
+            
+            const prompt = document.getElementById('promptInput').value;
+            const output = document.getElementById('generationOutput');
+            const tokenSeq = document.getElementById('tokenSequence');
+            
+            // Simulate text generation
+            const promptTokens = prompt.toLowerCase().split(' ');
+            let generated = [...promptTokens];
+            
+            // Generate 10-15 more tokens
+            const numTokens = Math.floor(Math.random() * 6) + 10;
+            
+            output.textContent = 'Generating...';
+            tokenSeq.innerHTML = '';
+            
+            let step = 0;
+            function generateStep() {
+                if (step < numTokens) {
+                    // Pick a random token (biased toward common ones)
+                    const commonTokens = ['the', 'and', 'of', 'to', 'a', 'in', 'is', 'that', 'for', 'with'];
+                    const nextToken = Math.random() < 0.6 ? 
+                        commonTokens[Math.floor(Math.random() * commonTokens.length)] :
+                        vocabulary[Math.floor(Math.random() * vocabulary.length)];
+                    
+                    generated.push(nextToken);
+                    
+                    // Update output
+                    output.textContent = generated.join(' ');
+                    
+                    // Update token sequence with highlighting
+                    tokenSeq.innerHTML = '';
+                    generated.forEach((token, idx) => {
+                        const tokenEl = document.createElement('span');
+                        tokenEl.className = 'token';
+                        tokenEl.textContent = token;
+                        
+                        if (idx === generated.length - 1) {
+                            tokenEl.classList.add('highlight');
+                        }
+                        
+                        tokenSeq.appendChild(tokenEl);
+                    });
+                    
+                    step++;
+                    setTimeout(generateStep, 300); // Animate generation
+                } else {
+                    // Generation complete
+                    output.textContent = generated.join(' ');
+                    
+                    // Show final token probabilities
+                    updateTokenPredictions();
+                }
+            }
+            
+            generateStep();
+        }
+        
+        function resetModel() {
+            model = null;
+            isTraining = false;
+            currentEpoch = 0;
+            trainingHistory = {
+                epochs: [],
+                trainLoss: [],
+                valLoss: [],
+                perplexity: []
+            };
+            
+            // Reset UI
+            document.getElementById('status').textContent = 'Click "Initialize Model" to begin';
+            document.getElementById('trainBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('generateBtn').disabled = true;
+            
+            // Clear charts
+            if (lossChart) {
+                lossChart.data.labels = [];
+                lossChart.data.datasets[0].data = [];
+                lossChart.update();
+            }
+            
+            if (tokenChart) {
+                tokenChart.data.labels = [];
+                tokenChart.data.datasets[0].data = [];
+                tokenChart.update();
+            }
+            
+            // Clear other visualizations
+            document.getElementById('attentionGrid').innerHTML = '';
+            document.getElementById('generationOutput').textContent = 'Generated text will appear here...';
+            document.getElementById('tokenSequence').innerHTML = '';
+            document.getElementById('currentSentence').textContent = '--';
+            
+            // Reset metrics
+            document.getElementById('epoch').textContent = '0';
+            document.getElementById('loss').textContent = '--';
+            document.getElementById('perplexity').textContent = '--';
+            document.getElementById('tokens').textContent = '0';
+            document.getElementById('progress').style.width = '0%';
+            
+            // Clear embedding space
+            const embeddingSpace = document.getElementById('embeddingSpace');
+            embeddingSpace.innerHTML = '';
+        }
+        
+        // Advanced visualization features
+        function showAttentionHeadComparison() {
+            if (!model) return;
+            
+            const grid = document.getElementById('attentionGrid');
+            grid.innerHTML = '<h4 style="grid-column: 1/-1; text-align: center; margin: 10px 0;">Attention Heads Comparison</h4>';
+            
+            const tokens = ['to', 'be', 'or', 'not', 'to', 'be'];
+            
+            // Show all 4 attention heads
+            for (let head = 0; head < model.n_heads; head++) {
+                const headDiv = document.createElement('div');
+                headDiv.innerHTML = `<strong>Head ${head + 1}</strong>`;
+                headDiv.style.gridColumn = '1/-1';
+                headDiv.style.textAlign = 'center';
+                headDiv.style.margin = '10px 0 5px 0';
+                headDiv.style.fontSize = '12px';
+                grid.appendChild(headDiv);
+                
+                const attention = model.attention_weights[0][head];
+                
+                if (attention) {
+                    for (let i = 0; i < Math.min(tokens.length, attention.length); i++) {
+                        for (let j = 0; j <= i; j++) {
+                            const cell = document.createElement('div');
+                            cell.className = 'attention-cell';
+                            cell.style.width = '20px';
+                            cell.style.height = '20px';
+                            
+                            const weight = attention[i] ? attention[i][j] || 0 : 0;
+                            const intensity = Math.min(1, weight * 3);
+                            
+                            // Different colors for different heads
+                            const colors = ['255,215,0', '255,107,107', '78,205,196', '138,43,226'];
+                            cell.style.backgroundColor = `rgba(${colors[head]}, ${intensity})`;
+                            cell.title = `Head ${head + 1}: ${tokens[i]} → ${tokens[j]}: ${weight.toFixed(3)}`;
+                            
+                            grid.appendChild(cell);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function visualizeGradientFlow() {
+            // Simulate gradient flow visualization
+            const container = document.getElementById('embeddingSpace');
+            const svg = container.svg;
+            
+            if (!svg) return;
+            
+            // Clear previous content
+            svg.selectAll('*').remove();
+            
+            const width = container.clientWidth;
+            const height = 300;
+            
+            // Create gradient flow lines
+            const layers = ['Input', 'Attention', 'FFN', 'Output'];
+            const layerY = layers.map((_, i) => (i + 1) * height / (layers.length + 1));
+            
+            // Draw layer boxes
+            layers.forEach((layer, i) => {
+                svg.append('rect')
+                    .attr('x', width/2 - 60)
+                    .attr('y', layerY[i] - 15)
+                    .attr('width', 120)
+                    .attr('height', 30)
+                    .attr('fill', 'rgba(255, 255, 255, 0.2)')
+                    .attr('stroke', '#4ECDC4')
+                    .attr('stroke-width', 2)
+                    .attr('rx', 5);
+                
+                svg.append('text')
+                    .attr('x', width/2)
+                    .attr('y', layerY[i] + 5)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', 'white')
+                    .attr('font-size', '12px')
+                    .text(layer);
+            });
+            
+            // Animate gradient flow
+            function animateGradients() {
+                // Remove old gradients
+                svg.selectAll('.gradient-line').remove();
+                
+                // Add new gradient lines
+                for (let i = 0; i < layers.length - 1; i++) {
+                    for (let j = 0; j < 5; j++) {
+                        const line = svg.append('line')
+                            .attr('class', 'gradient-line')
+                            .attr('x1', width/2 + (j - 2) * 20)
+                            .attr('y1', layerY[i] + 15)
+                            .attr('x2', width/2 + (j - 2) * 20)
+                            .attr('y2', layerY[i + 1] - 15)
+                            .attr('stroke', '#FFD700')
+                            .attr('stroke-width', 2)
+                            .attr('opacity', 0);
+                        
+                        line.transition()
+                            .duration(1000)
+                            .delay(j * 100)
+                            .attr('opacity', 0.8)
+                            .transition()
+                            .duration(500)
+                            .attr('opacity', 0);
+                    }
+                }
+            }
+            
+            // Start animation
+            animateGradients();
+            setInterval(animateGradients, 2000);
+        }
+        
+        function showLearningProgress() {
+            // Create a comprehensive learning dashboard
+            const metrics = {
+                'Token Accuracy': Math.min(0.95, 0.1 + currentEpoch * 0.02),
+                'Attention Coherence': Math.min(0.9, 0.2 + currentEpoch * 0.015),
+                'Embedding Quality': Math.min(0.85, 0.15 + currentEpoch * 0.018),
+                'Generation Fluency': Math.min(0.88, 0.05 + currentEpoch * 0.025)
+            };
+            
+            // Update UI with these metrics
+            console.log('Learning Progress:', metrics);
+        }
+        
+        // Enhanced generation with step-by-step visualization
+        function generateTextStepByStep() {
+            if (!model) return;
+            
+            const prompt = document.getElementById('promptInput').value;
+            const output = document.getElementById('generationOutput');
+            const tokenSeq = document.getElementById('tokenSequence');
+            
+            output.textContent = '';
+            tokenSeq.innerHTML = '';
+            
+            const promptTokens = prompt.toLowerCase().split(' ');
+            let currentSequence = [...promptTokens];
+            
+            function generateNextToken(step) {
+                if (step >= 15) return; // Limit generation length
+                
+                // Show current sequence
+                tokenSeq.innerHTML = '';
+                currentSequence.forEach((token, idx) => {
+                    const tokenEl = document.createElement('span');
+                    tokenEl.className = 'token';
+                    tokenEl.textContent = token;
+                    
+                    if (idx === currentSequence.length - 1) {
+                        tokenEl.classList.add('highlight');
+                    }
+                    
+                    tokenSeq.appendChild(tokenEl);
+                });
+                
+                // Simulate model thinking
+                output.textContent = currentSequence.join(' ') + ' [thinking...]';
+                
+                setTimeout(() => {
+                    // Get predictions
+                    const predictions = model.predict(currentSequence.join(' '));
+                    const topTokens = Object.entries(predictions)
+                        .sort(([,a], [,b]) => b - a)
+                        .slice(0, 5);
+                    
+                    // Show top predictions with probabilities
+                    let predictionText = '\n\nTop predictions:\n';
+                    topTokens.forEach(([token, prob]) => {
+                        predictionText += `${token}: ${(prob * 100).toFixed(1)}%\n`;
+                    });
+                    
+                    output.textContent = currentSequence.join(' ') + predictionText;
+                    
+                    setTimeout(() => {
+                        // Select token (simulate sampling)
+                        const selectedToken = topTokens[0][0]; // Take most likely for demo
+                        currentSequence.push(selectedToken);
+                        
+                        output.textContent = currentSequence.join(' ');
+                        
+                        // Continue generation
+                        setTimeout(() => generateNextToken(step + 1), 500);
+                    }, 1000);
+                }, 800);
+            }
+            
+            generateNextToken(0);
+        }
+        
+        // Auto-start demo when page loads
+        window.onload = function() {
+            // Add enhanced generate button
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.onclick = generateTextStepByStep;
+            
+            // Start with a demo
+            setTimeout(initializeModel, 1000);
+        };
+        
+        // Add keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            if (event.ctrlKey || event.metaKey) {
+                switch(event.key) {
+                    case 't':
+                        event.preventDefault();
+                        if (!isTraining && model) startTraining();
+                        break;
+                    case 'g':
+                        event.preventDefault();
+                        if (model) generateText();
+                        break;
+                    case 'r':
+                        event.preventDefault();
+                        resetModel();
+                        break;
+                }
+            }
+        });
+        
+        // Add tooltips for better UX
+        function addTooltips() {
+            const tooltips = {
+                'trainBtn': 'Start the training process (Ctrl+T)',
+                'generateBtn': 'Generate text with current model (Ctrl+G)',
+                'resetModel': 'Reset everything and start over (Ctrl+R)'
+            };
+            
+            Object.entries(tooltips).forEach(([id, text]) => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.title = text;
+                }
+            });
+        }
+        
+        // Performance monitoring
+        function monitorPerformance() {
+            const startTime = performance.now();
+            
+            return function() {
+                const endTime = performance.now();
+                const duration = endTime - startTime;
+                
+                if (duration > 100) { // If operation takes more than 100ms
+                    console.log(`Performance warning: Operation took ${duration.toFixed(2)}ms`);
+                }
+                
+                return duration;
+            };
+        }
+        
+        // Add visual effects for training
+        function addTrainingEffects() {
+            if (!isTraining) return;
+            
+            // Pulse effect on training
+            const container = document.querySelector('.container');
+            container.style.animation = 'pulse 2s infinite';
+            
+            // Add CSS for pulse animation
+            if (!document.getElementById('dynamicStyles')) {
+                const style = document.createElement('style');
+                style.id = 'dynamicStyles';
+                style.textContent = `
+                    @keyframes pulse {
+                        0% { box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37); }
+                        50% { box-shadow: 0 8px 32px 0 rgba(255, 215, 0, 0.3); }
+                        100% { box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37); }
+                    }
+                    
+                    @keyframes tokenHighlight {
+                        0% { transform: scale(1); }
+                        50% { transform: scale(1.2); }
+                        100% { transform: scale(1); }
+                    }
+                    
+                    .token.highlight {
+                        animation: tokenHighlight 0.6s ease-in-out;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
+        
+        // Enhanced attention visualization with head comparison
+        function createAttentionHeatmap() {
+            const grid = document.getElementById('attentionGrid');
+            const tokens = ['to', 'be', 'or', 'not'];
+            
+            // Create multi-head attention display
+            grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; font-weight: bold; margin-bottom: 10px;">Multi-Head Attention Patterns</div>';
+            
+            model.attention_weights[0] && Object.keys(model.attention_weights[0]).forEach(headIdx => {
+                const headDiv = document.createElement('div');
+                headDiv.style.gridColumn = '1/-1';
+                headDiv.style.margin = '10px 0 5px 0';
+                headDiv.innerHTML = `<strong>Head ${parseInt(headIdx) + 1}</strong> - ${getHeadDescription(headIdx)}`;
+                grid.appendChild(headDiv);
+                
+                // Create attention matrix for this head
+                const attention = model.attention_weights[0][headIdx];
+                
+                if (attention && attention.length > 0) {
+                    const matrixContainer = document.createElement('div');
+                    matrixContainer.style.display = 'grid';
+                    matrixContainer.style.gridTemplateColumns = `repeat(${tokens.length}, 1fr)`;
+                    matrixContainer.style.gap = '2px';
+                    matrixContainer.style.margin = '5px 0 15px 0';
+                    
+                    for (let i = 0; i < tokens.length; i++) {
+                        for (let j = 0; j <= i; j++) {
+                            const cell = document.createElement('div');
+                            cell.className = 'attention-cell';
+                            cell.style.width = '30px';
+                            cell.style.height = '30px';
+                            
+                            const weight = attention[i] ? attention[i][j] || 0 : Math.random() * 0.5;
+                            const intensity = Math.min(1, weight * 2);
+                            
+                            // Color-code by head
+                            const headColors = [
+                                [255, 215, 0],   // Gold
+                                [255, 107, 107], // Red
+                                [78, 205, 196],  // Teal
+                                [138, 43, 226]   // Purple
+                            ];
+                            
+                            const [r, g, b] = headColors[headIdx % headColors.length];
+                            cell.style.backgroundColor = `rgba(${r}, ${g}, ${b}, ${intensity})`;
+                            cell.style.border = '1px solid rgba(255, 255, 255, 0.3)';
+                            cell.title = `${tokens[i]} → ${tokens[j]}: ${weight.toFixed(3)}`;
+                            
+                            matrixContainer.appendChild(cell);
+                        }
+                        
+                        // Masked cells
+                        for (let j = i + 1; j < tokens.length; j++) {
+                            const cell = document.createElement('div');
+                            cell.className = 'attention-cell';
+                            cell.style.width = '30px';
+                            cell.style.height = '30px';
+                            cell.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+                            cell.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                            cell.title = 'Masked (future token)';
+                            matrixContainer.appendChild(cell);
+                        }
+                    }
+                    
+                    grid.appendChild(matrixContainer);
+                }
+            });
+        }
+        
+        function getHeadDescription(headIdx) {
+            const descriptions = [
+                'Local patterns (adjacent words)',
+                'Long-range dependencies',
+                'Syntactic relationships',
+                'Semantic associations'
+            ];
+            return descriptions[headIdx] || 'General attention';
+        }
+        
+        // Real-time learning metrics
+        function updateRealTimeLearning() {
+            if (!isTraining || !model) return;
+            
+            // Simulate learning metrics
+            const learningRate = 0.001 * Math.exp(-currentEpoch * 0.05);
+            const gradientNorm = 1.0 * Math.exp(-currentEpoch * 0.03) + Math.random() * 0.1;
+            
+            // Add these to the status
+            const statusEl = document.getElementById('status');
+            statusEl.innerHTML = `
+                Training in progress...<br>
+                <small>Learning Rate: ${learningRate.toFixed(6)} | Gradient Norm: ${gradientNorm.toFixed(3)}</small>
+            `;
+            
+            // Visual feedback for learning rate
+            const container = document.querySelector('.container');
+            const intensity = Math.max(0.1, learningRate * 1000);
+            container.style.borderLeft = `5px solid rgba(255, 215, 0, ${intensity})`;
+        }
+        
+        // Initialize enhanced features
+        setTimeout(() => {
+            addTooltips();
+            
+            // Override the attention update to use enhanced version
+            const originalUpdate = updateAttentionVisualization;
+            updateAttentionVisualization = function() {
+                if (currentEpoch % 5 === 0) {
+                    createAttentionHeatmap();
+                } else {
+                    originalUpdate();
+                }
+            };
+            
+            // Add learning effects to training
+            const originalTrainStep = trainStep;
+            trainStep = function() {
+                originalTrainStep();
+                addTrainingEffects();
+                updateRealTimeLearning();
+                
+                // Show gradient flow every 10 epochs
+                if (currentEpoch % 10 === 0) {
+                    visualizeGradientFlow();
+                }
+            };
+        }, 500);
+        
+    </script>
+</body>
+</html>

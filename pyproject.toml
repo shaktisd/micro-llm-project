@@ -1,0 +1,17 @@
+[project]
+name = "micro-llm-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.5",
+    "numpy>=2.3.2",
+    "pandas>=2.3.1",
+    "plotly>=6.2.0",
+    "requests>=2.32.4",
+    "scikit-learn>=1.7.1",
+    "seaborn>=0.13.2",
+    "tqdm>=4.67.1",
+]

@@ -1,4 +1,6 @@
 # Micro LLM
+This project demonstrates the training and inference of a small language model using PyTorch. It includes utilities for training, visualization, and interactive chat capabilities.
+```
 micro-llm-project/
 ├── src/
 │   ├── micro_llm.py
@@ -14,5 +16,11 @@ micro-llm-project/
 ├── training_logs/
 ├── requirements.txt
 └── README.md
+```
+## Installation
+To set up the environment, install the required packages using uv:
+uv sync
 
-uv pip install torch --index-url https://download.pytorch.org/whl/cu126                          
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu126  
+

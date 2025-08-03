@@ -2,14 +2,51 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
 import math
-import re
-from collections import Counter
-from typing import Dict, List, Tuple, Optional
-import requests
 import os
+import pickle
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from collections import Counter
+from typing import Dict, List, Tuple, Optional, Union
+from torch.utils.data import Dataset, DataLoader
+
+def visualize_attention(attention_weights: torch.Tensor, tokens: List[str], layer_idx: int, head_idx: int):
+    """
+    Visualize attention weights for a specific layer and attention head.
+    Args:
+        attention_weights: Tensor of shape [batch_size, n_heads, seq_len, seq_len]
+        tokens: List of input tokens
+        layer_idx: Index of the transformer layer
+        head_idx: Index of the attention head
+    """
+    # Get attention weights for the specified head
+    attn = attention_weights[0, head_idx].cpu().detach().numpy()
+    
+    # Create heatmap
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(attn, xticklabels=tokens, yticklabels=tokens, annot=True, fmt='.2f', cmap='viridis')
+    plt.title(f'Layer {layer_idx}, Head {head_idx} Attention Weights')
+    plt.xlabel('Key/Value Tokens')
+    plt.ylabel('Query Tokens')
+    plt.xticks(rotation=45)
+    plt.yticks(rotation=45)
+    plt.tight_layout()
+    
+    # Save the plot
+    os.makedirs('visualizations', exist_ok=True)
+    plt.savefig(f'visualizations/attention_layer{layer_idx}_head{head_idx}.png')
+    plt.close()
+
+def print_step_info(step: str, details: str = ""):
+    """Print formatted step information during inference"""
+    print(f"\n{'='*80}")
+    print(f"STEP: {step}")
+    if details:
+        print(f"Details: {details}")
+    print(f"{'='*80}")
 
 # ============================================================================
 # 1. TOKENIZER - Convert text to numbers and back
@@ -154,32 +191,63 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(d_model, d_model)
         
         self.dropout = nn.Dropout(dropout)
+        self.last_attention_weights = None  # Store for visualization
         
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None, debug: bool = False):
         batch_size, seq_len, _ = x.shape
+        
+        if debug:
+            print_step_info("Multi-Head Attention", 
+                          f"Input shape: {x.shape}, Heads: {self.n_heads}, Head dim: {self.d_k}")
         
         # Linear projections and reshape for multi-head attention
         Q = self.W_q(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
         K = self.W_k(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
         V = self.W_v(x).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
         
+        if debug:
+            print(f"Q shape: {Q.shape}, K shape: {K.shape}, V shape: {V.shape}")
+            print("\nAttention computation steps:")
+            print("1. Project input into Query, Key, Value vectors for each attention head")
+        
         # Scaled dot-product attention
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        
+        if debug:
+            print("2. Compute attention scores: Q × K^T / sqrt(d_k)")
+            print(f"Raw attention scores shape: {scores.shape}")
         
         # Apply causal mask (for autoregressive generation)
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
+            if debug:
+                print("3. Apply causal mask to prevent attending to future tokens")
         
         # Apply softmax to get attention weights
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
         
+        if debug:
+            print("4. Apply softmax to get attention probabilities")
+            print(f"Attention weights shape: {attn_weights.shape}")
+        
+        # Store attention weights for visualization
+        self.last_attention_weights = attn_weights.detach()
+        
         # Apply attention to values
         context = torch.matmul(attn_weights, V)
+        
+        if debug:
+            print("5. Apply attention weights to Values")
+            print(f"Context vectors shape: {context.shape}")
         
         # Concatenate heads and apply output projection
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
         output = self.W_o(context)
+        
+        if debug:
+            print("6. Concatenate all heads and project to output dimension")
+            print(f"Final output shape: {output.shape}")
         
         return output
 
@@ -210,14 +278,29 @@ class TransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
         
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None, debug: bool = False):
+        if debug:
+            print_step_info("Transformer Block", f"Input shape: {x.shape}")
+            print("1. Applying Layer Normalization before Self-Attention")
+        
         # Self-attention with residual connection
-        attn_output = self.attention(self.norm1(x), mask)
+        normalized_x = self.norm1(x)
+        attn_output = self.attention(normalized_x, mask, debug=debug)
         x = x + self.dropout(attn_output)
         
+        if debug:
+            print("2. Add residual connection from input")
+            print(f"Shape after attention: {x.shape}")
+            print("\n3. Applying Layer Normalization before Feed-Forward")
+        
         # Feed-forward with residual connection
-        ff_output = self.feed_forward(self.norm2(x))
+        normalized_x = self.norm2(x)
+        ff_output = self.feed_forward(normalized_x)
         x = x + self.dropout(ff_output)
+        
+        if debug:
+            print("4. Add residual connection from attention output")
+            print(f"Final output shape: {x.shape}")
         
         return x
 
@@ -444,49 +527,105 @@ def generate_text(
     prompt: str, 
     max_length: int = 50, 
     temperature: float = 1.0,
-    top_k: int = 50
+    top_k: int = 50,
+    visualize: bool = True,
+    debug: bool = True
 ):
     """
-    Generate text using the trained model.
+    Generate text using the trained model with visualization and debugging.
     Implements several sophisticated sampling strategies.
     """
     device = next(model.parameters()).device
     model.eval()
     
+    if debug:
+        print_step_info("Text Generation", f"Prompt: '{prompt}'")
+        print("Model Configuration:")
+        print(f"Temperature: {temperature}")
+        print(f"Top-k: {top_k}")
+        print(f"Max length: {max_length}")
+    
     # Encode the prompt
     input_ids = tokenizer.encode(prompt, add_special_tokens=False)
     input_ids = torch.tensor([input_ids], dtype=torch.long).to(device)
     
+    if debug:
+        print("\nTokenized prompt:")
+        tokens = [tokenizer.id_to_word[id_] for id_ in input_ids[0].tolist()]
+        print(f"Tokens: {tokens}")
+        print(f"Token IDs: {input_ids[0].tolist()}")
+    
     generated_ids = input_ids.clone()
+    generated_tokens = []
     
     with torch.no_grad():
-        for _ in range(max_length):
-            # Get model predictions
+        for step in range(max_length):
+            if debug:
+                print(f"\nGeneration Step {step + 1}")
+                print("-" * 40)
+            
+            # Get model predictions with debugging
             logits = model(generated_ids)
             
             # Get logits for the last token
             last_token_logits = logits[0, -1, :] / temperature
             
+            if debug:
+                print("\nToken Selection:")
+                print(f"1. Applied temperature {temperature} to logits")
+            
             # Top-k sampling: only consider top k most likely tokens
             if top_k > 0:
                 top_k_logits, top_k_indices = torch.topk(last_token_logits, top_k)
-                # Set all other logits to negative infinity
                 last_token_logits = torch.full_like(last_token_logits, -float('inf'))
                 last_token_logits[top_k_indices] = top_k_logits
+                
+                if debug:
+                    print(f"2. Selected top {top_k} tokens")
+                    top_k_words = [tokenizer.id_to_word[idx.item()] for idx in top_k_indices[:5]]
+                    top_k_probs = F.softmax(top_k_logits[:5], dim=0)
+                    print("Top 5 candidates:")
+                    for word, prob in zip(top_k_words, top_k_probs):
+                        print(f"   {word}: {prob:.3f}")
             
             # Sample from the probability distribution
             probs = F.softmax(last_token_logits, dim=-1)
             next_token = torch.multinomial(probs, 1)
             
+            if debug:
+                print(f"3. Sampled token: '{tokenizer.id_to_word[next_token.item()]}'")
+            
+            # Visualize attention patterns
+            if visualize and step % 2 == 0:  # Visualize every other step to reduce clutter
+                for layer_idx in range(len(model.transformer_blocks)):
+                    block = model.transformer_blocks[layer_idx]
+                    if hasattr(block.attention, 'last_attention_weights'):
+                        current_tokens = [tokenizer.id_to_word[id_] for id_ in generated_ids[0].tolist()]
+                        for head in range(block.attention.n_heads):
+                            visualize_attention(
+                                block.attention.last_attention_weights,
+                                current_tokens,
+                                layer_idx,
+                                head
+                            )
+            
             # Stop if we generate end token
             if next_token.item() == tokenizer.word_to_id[tokenizer.EOS_TOKEN]:
+                if debug:
+                    print("\nGenerated EOS token, stopping generation")
                 break
             
             # Append the new token
             generated_ids = torch.cat([generated_ids, next_token.unsqueeze(0)], dim=1)
+            generated_tokens.append(tokenizer.id_to_word[next_token.item()])
+            
+            if debug:
+                print(f"Current text: {prompt} {''.join(generated_tokens)}")
             
             # Prevent infinite generation
             if generated_ids.size(1) > model.max_length:
+                if debug:
+                    print("\nReached maximum length, stopping generation")
                 break
     
     # Decode and return the generated text
